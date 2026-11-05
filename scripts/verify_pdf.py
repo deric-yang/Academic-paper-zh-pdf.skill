@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--dpi", default=96, type=int)
     parser.add_argument("--columns", default=4, type=int)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat near-blank pages as blocking failures instead of warnings.",
+    )
     return parser.parse_args()
 
 
@@ -49,6 +55,12 @@ def parse_pdfinfo(raw_info: str) -> dict[str, str]:
     return parsed
 
 
+def page_sort_key(path: Path) -> int:
+    """Sort rendered page files numerically instead of lexicographically."""
+    match = re.search(r"-(\d+)\.png$", path.name)
+    return int(match.group(1)) if match else 0
+
+
 def ink_ratio(image: Image.Image) -> float:
     """Estimate the share of pixels that differ meaningfully from white."""
     rgb = image.convert("RGB")
@@ -60,15 +72,17 @@ def ink_ratio(image: Image.Image) -> float:
 
 
 def render_pages(pdf: Path, output_dir: Path, dpi: int) -> list[Path]:
-    """Render all PDF pages to PNG files."""
+    """Render all PDF pages to PNG files, replacing any previous render."""
     page_dir = output_dir / "pages"
-    page_dir.mkdir(parents=True, exist_ok=True)
+    if page_dir.exists():
+        shutil.rmtree(page_dir)
+    page_dir.mkdir(parents=True)
     prefix = page_dir / "page"
     subprocess.run(
         [require_command("pdftoppm"), "-png", "-r", str(dpi), str(pdf), str(prefix)],
         check=True,
     )
-    return sorted(page_dir.glob("page-*.png"))
+    return sorted(page_dir.glob("page-*.png"), key=page_sort_key)
 
 
 def build_contact_sheet(pages: list[Path], output: Path, columns: int) -> None:
@@ -94,7 +108,37 @@ def build_contact_sheet(pages: list[Path], output: Path, columns: int) -> None:
     sheet.save(output)
 
 
-def audit(pdf: Path, output_dir: Path, dpi: int, columns: int) -> dict[str, Any]:
+def evaluate_result(
+    reported_pages: int,
+    rendered_pages: int,
+    text: str,
+    near_blank_pages: list[int],
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Return blocking issues and non-blocking warnings for a finished audit."""
+    blocking: list[str] = []
+    warnings: list[str] = []
+
+    if reported_pages != rendered_pages:
+        blocking.append(
+            f"page count mismatch: pdfinfo reports {reported_pages}, rendered {rendered_pages}",
+        )
+
+    replacement_characters = text.count("\ufffd")
+    if replacement_characters:
+        blocking.append(f"extracted text contains {replacement_characters} replacement characters")
+
+    if near_blank_pages:
+        message = f"near-blank pages: {', '.join(str(page) for page in near_blank_pages)}"
+        if strict:
+            blocking.append(message)
+        else:
+            warnings.append(message)
+
+    return blocking, warnings
+
+
+def audit(pdf: Path, output_dir: Path, dpi: int, columns: int, strict: bool) -> dict[str, Any]:
     """Run structural, text, and rendered-page checks."""
     if not pdf.is_file():
         raise FileNotFoundError(pdf)
@@ -122,7 +166,15 @@ def audit(pdf: Path, output_dir: Path, dpi: int, columns: int) -> dict[str, Any]
 
     contact_sheet = output_dir / "contact-sheet.png"
     build_contact_sheet(pages, contact_sheet, columns)
-    reported_pages = int(info.get("Pages", "0"))
+    reported_pages = int(info.get("Pages", "0") or "0")
+    near_blank_pages = [item["page"] for item in page_checks if item["near_blank"]]
+    blocking, warnings = evaluate_result(
+        reported_pages,
+        len(pages),
+        text,
+        near_blank_pages,
+        strict,
+    )
     result: dict[str, Any] = {
         "pdf": str(pdf.resolve()),
         "pdfinfo": info,
@@ -131,7 +183,11 @@ def audit(pdf: Path, output_dir: Path, dpi: int, columns: int) -> dict[str, Any]
         "page_count_matches": reported_pages == len(pages),
         "text_characters": len(text),
         "replacement_characters": text.count("\ufffd"),
-        "near_blank_pages": [item["page"] for item in page_checks if item["near_blank"]],
+        "near_blank_pages": near_blank_pages,
+        "blocking_issues": blocking,
+        "warnings": warnings,
+        "ok": not blocking,
+        "strict": strict,
         "pages": page_checks,
         "contact_sheet": str(contact_sheet.resolve()),
     }
@@ -143,8 +199,13 @@ def audit(pdf: Path, output_dir: Path, dpi: int, columns: int) -> dict[str, Any]
 def main() -> None:
     """Run the PDF audit and print its summary."""
     args = parse_args()
-    result = audit(args.pdf, args.output_dir, args.dpi, args.columns)
+    if args.dpi <= 0 or args.columns <= 0:
+        raise SystemExit("--dpi and --columns must be positive")
+    result = audit(args.pdf, args.output_dir, args.dpi, args.columns, args.strict)
     summary = {
+        "ok": result["ok"],
+        "blocking_issues": result["blocking_issues"],
+        "warnings": result["warnings"],
         "page_count_matches": result["page_count_matches"],
         "rendered_page_count": result["rendered_page_count"],
         "replacement_characters": result["replacement_characters"],
@@ -152,6 +213,8 @@ def main() -> None:
         "contact_sheet": result["contact_sheet"],
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if not result["ok"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

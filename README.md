@@ -32,22 +32,29 @@ git clone https://github.com/deric-yang/Academic-paper-zh-pdf.skill.git \
 
 ### 使用打包文件
 
-[下载可安装的 `academic-paper-zh-pdf.skill`](./dist/academic-paper-zh-pdf.skill)。该包只包含运行时需要的 `SKILL.md`、参考规范、构建脚本和打印样式。
+[下载可安装的 `academic-paper-zh-pdf.skill`](./dist/academic-paper-zh-pdf.skill)，解压到 Codex skills 目录：
+
+```bash
+unzip academic-paper-zh-pdf.skill -d ~/.codex/skills/
+```
+
+该包只包含运行时需要的 `SKILL.md`、参考规范、构建脚本和打印样式。
 
 当前包 SHA-256：
 
 ```text
-7ee2a0be7d042cf117896ad5458cbe1da2fa1e2deced2ecd8daf63b8f59f8f3f
+723a9aff94d4a11f7e96649715a6312ce7cbb72ba6893c5ffb09b56dcf107865
 ```
 
 ## 依赖
 
 - 可调用的大模型；
-- Pandoc；
+- Pandoc ≥ 2.19（构建脚本使用 `--embed-resources`）；
 - Chromium 或 Google Chrome；
 - Poppler：`pdfinfo`、`pdftotext`、`pdftoppm`；
 - Python 3 与 Pillow；
-- Node.js。
+- Node.js ≥ 18；
+- CJK 字体（如 Noto Serif/Sans CJK SC），否则 PDF 会缺字。
 
 当论文提供 LaTeX、Markdown 或 arXiv 源码时，应优先采用源文件重排；只有 PDF 时可使用 BabelDOC、PDFMathTranslate 或 OCR 结果作为初稿，但仍需执行术语校正和全页 QA。
 
@@ -87,7 +94,18 @@ python scripts/verify_pdf.py \
   --output-dir /absolute/path/qa
 ```
 
-PDF 只有在全部页面成功渲染、自动检查无阻断错误，并且 contact sheet 已完成人工查看后才算交付完成。
+构建脚本会把 `assets/paper.css` 与原图嵌入 HTML，因此 HTML 可单文件交付；默认保留 Markdown 中的章节编号，原稿没有编号时才加 `--number-sections`。缺失图片会让构建直接失败，而不是生成破图 PDF。
+
+`verify_pdf.py` 在页数不一致或文本出现替换字符时以非零状态退出；`--strict` 还会把近空白页视为阻断，`pdf-audit.json` 的 `blocking_issues`/`warnings` 可直接消费。PDF 只有在全部页面成功渲染、自动检查无阻断错误，并且 contact sheet 已完成人工查看后才算交付完成。
+
+## 打包
+
+```bash
+python3 scripts/build_skill.py          # 重新生成 dist/academic-paper-zh-pdf.skill，并打印 SHA-256
+python3 scripts/build_skill.py --check  # 校验已提交的包与源码一致
+```
+
+打包使用固定时间戳和不压缩存储（ZIP_STORED），同一份源码生成相同哈希；修改 `SKILL.md`、脚本或样式后必须重新打包并更新上面的 SHA-256。
 
 ## 仓库结构
 
@@ -96,8 +114,12 @@ PDF 只有在全部页面成功渲染、自动检查无阻断错误，并且 con
 ├── SKILL.md
 ├── assets/paper.css
 ├── references/translation-quality.md
-├── scripts/build_pdf.mjs
-├── scripts/verify_pdf.py
+├── scripts/
+│   ├── build_pdf.mjs
+│   ├── build_skill.py
+│   └── verify_pdf.py
+├── tests/test_verify_pdf.py
+├── .github/workflows/ci.yml
 └── dist/academic-paper-zh-pdf.skill
 ```
 

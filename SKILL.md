@@ -1,7 +1,7 @@
 ---
 name: academic-paper-zh-pdf
 description: 将英文或其他外文学术论文（PDF、arXiv ID、LaTeX/Markdown 源码）翻译为经过术语校正、保留公式/引文/原图/图题/表格并通过全页视觉验收的中文 Markdown、HTML 与完整 PDF。凡用户要求“翻译论文 PDF”“保留原图排版”“把 arXiv 论文做成中文版”“生成图文完整中文论文”或需要可复现的学术 PDF 本地化工作流时，都应使用本 skill；仅做摘要、问答或无需生成译文文件时不要触发。
-compatibility: 需要可调用的大模型、Pandoc、Poppler（pdfinfo/pdftotext/pdftoppm）和 Chromium/Google Chrome；有 LaTeX 或 arXiv 源码时优先使用。
+compatibility: 需要可调用的大模型、Pandoc ≥2.19、Poppler（pdfinfo/pdftotext/pdftoppm）、Chromium/Google Chrome、Node.js ≥18、Python 3 与 Pillow，以及 CJK 字体（如 Noto Serif/Sans CJK SC）；有 LaTeX 或 arXiv 源码时优先使用。
 ---
 
 # 学术论文中文图文 PDF
@@ -66,6 +66,8 @@ paper-translation/
 
 当 LaTeX/Markdown 与原图可得时，翻译语义结构并重新排版。它最适合需要高质量中文、可维护 Markdown、完整公式与原图的正式交付。
 
+LaTeX 源先转换为 Markdown（例如 `pandoc -f latex -t markdown paper.tex -o paper.zh-CN.md`），再进入第 6 节的构建脚本；构建脚本只接受 Markdown 输入，避免把 `.tex` 当作 Markdown 解析。复杂表格、公式和自定义宏仍需人工核对。
+
 ### BabelDOC / PDFMathTranslate（可选的快速初稿路线）
 
 当源文件不可得、原版布局保真度优先，或需要快速生成对照稿时，可以用成熟引擎生成初稿。使用前核对其当前许可证、模型后端、隐私设置和可重复性。自动生成结果仍需经过本文的术语校正、缺失检测和全页视觉验收；不要把引擎“成功退出”等同于译文合格。
@@ -122,6 +124,8 @@ node scripts/build_pdf.mjs \
 
 有 BibTeX 时追加 `--bibliography /absolute/path/references.bib`。脚本使用 Pandoc 生成 HTML，再由 Chromium 打印为 PDF。若运行环境已经提供更可靠的 PDF 渲染接口，可以替换打印步骤，但仍保留 HTML 和后续验收。
 
+构建脚本会用 `--embed-resources` 把打印样式和原图嵌入生成的 HTML，因此 `output/paper.zh-CN.html` 可单文件交付；默认保留 Markdown 中的章节编号，只有原稿标题没有编号时才加 `--number-sections`。缺失图片会让构建直接失败，而不是生成破图 PDF。
+
 ## 7. 全页渲染验收
 
 运行：
@@ -132,7 +136,7 @@ python scripts/verify_pdf.py \
   --output-dir /absolute/path/qa
 ```
 
-该脚本会记录页数、文本提取、替换字符、页面尺寸和近空白页，并渲染所有页面与联系表。然后必须人工查看联系表，并以原始分辨率抽查：
+该脚本会记录页数、文本提取、替换字符、页面尺寸和近空白页，并渲染所有页面与联系表。页数不一致或文本出现替换字符时，脚本以非零状态退出；加 `--strict` 还会把近空白页视为阻断。`pdf-audit.json` 中的 `blocking_issues` 与 `warnings` 可直接用于交付前检查。然后必须人工查看联系表，并以原始分辨率抽查：
 
 - 第一页、目录与章节起始页；
 - 含复杂表格、公式、跨页列表和大图的页面；
