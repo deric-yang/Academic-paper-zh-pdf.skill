@@ -47,6 +47,7 @@ p {
     text-align: justify;
     orphans: 3;
     widows: 3;
+    overflow-wrap: break-word;
 }
 
 a {
@@ -96,6 +97,7 @@ th, td {
     padding: 0.45em 0.55em;
     border: 0.5pt solid #b7c3d0;
     vertical-align: top;
+    overflow-wrap: anywhere;
 }
 
 th {

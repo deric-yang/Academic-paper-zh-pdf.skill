@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check Pillow
+      - name: Syntax checks
+        run: |
+          node --check scripts/build_pdf.mjs
+          python -m py_compile scripts/verify_pdf.py scripts/build_skill.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Dist archive is up to date
+        run: python scripts/build_skill.py --check
